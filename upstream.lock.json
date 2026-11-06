@@ -2,7 +2,7 @@
   "repository": "https://github.com/cursor/plugins.git",
   "ref": "main",
   "path": "pstack",
-  "commit": "bdf7aa355337897f167153e05069aca505dae17c",
+  "commit": "2776ddd2355d6d6c8747d3964600f28daf62f049",
   "protectedPrefixes": [
     "skills/poteto-mode/",
     "skills/pstack-pi/",
