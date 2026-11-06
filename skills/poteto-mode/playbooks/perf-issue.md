@@ -2,7 +2,7 @@
 
 **You own the measurement story. Plan, review, verify the numbers.** Tie every fix to a measurement, don't read source instead of measuring.
 
-1. Capture a baseline trace via the matching control skill.
+1. Capture a baseline trace via the matching control skill. Treat a number as established only when three things hold. You can name what limits it, you can rule out that the measurement caught something other than the work you think, and the harness prints an error count beside a count of the work done. Vet the baseline and every later number that way before you trust any of them.
 2. `how` to ground hypotheses; don't claim a perf ceiling without running it first.
    Most fixes come from eight strategy families. Use them as hypothesis generators, not a checklist. A family earns an attempt only when the trace shows the signal it names, and a focused fix for the dominant cost beats applying all eight.
    - **Elimination.** The cheapest work is work that doesn't run. Before optimizing the hot path, ask whether it needs to exist: a computation nobody consumes, a feature gate that's always off for this user, a sync that redundantly mirrors state, a legacy path kept "just in case". The trace shows what's slow, never that it's deletable, so this family needs the `how` pass, not the profiler. Deleting the work beats every other family when it applies.
@@ -21,4 +21,4 @@
 
 For sustained improvement against a metric rather than a one-off fix, use the Hillclimb playbook (`skill://poteto-mode/playbooks/hillclimb.md`).
 
-**Reply:** baseline number, post-fix number, delta, artifact path.
+**Reply:** baseline number, post-fix number, delta, artifact path, and one line on what limits the number.

@@ -7,20 +7,27 @@ const requiredSkills = new Set([
   "architect",
   "arena",
   "automate-me",
+  "benchmark-checklist",
   "blast-radius",
   "bro",
+  "correct",
+  "create-formal-verification-skill",
   "create-verification-skill",
   "figure-it-out",
   "how",
   "interrogate",
+  "maintain-formal-verification-skill",
   "maintain-verification-skill",
+  "make-bot-ui",
   "no-comments",
+  "poteto-help",
   "poteto-mode",
   "pstack-pi",
   "recall",
   "reflect",
   "setup-pstack",
   "show-me-your-work",
+  "statechart",
   "swarm",
   "tdd",
   "teach",
@@ -52,6 +59,13 @@ const requiredSkills = new Set([
   "principle-sequence-verifiable-units",
   "principle-subtract-before-you-add",
   "principle-type-system-discipline",
+  "principle-attack-the-premise",
+  "principle-explain-the-number",
+  "principle-test-behavior-not-implementation",
+  "in-your-own-words",
+  "ketchup",
+  "ketchup-video",
+  "sharpen",
 ]);
 
 const failures = [];
@@ -62,7 +76,7 @@ const skillDirs = (await readdir(skillsRoot, { withFileTypes: true }))
 for (const name of requiredSkills) {
   const path = join(skillsRoot, name, "SKILL.md");
   try {
-    const source = await readFile(path, "utf8");
+    const source = (await readFile(path, "utf8")).replaceAll("\r\n", "\n");
     const frontmatter = source.match(/^---\n([\s\S]*?)\n---/u)?.[1] ?? "";
     if (!/^name:\s*\S+/mu.test(frontmatter)) {
       failures.push(`${relative(root, path)} is missing frontmatter name`);
@@ -170,8 +184,15 @@ const forbidden = [
   "~/.cursor/",
   ".cursor/skills/",
   ".cursor/plugins/",
+  "~/.agents/skills/",
   "subagent_type:",
   "AskQuestion",
+  "cursor-team-kit",
+  "control-cli",
+  "control-ui",
+  "`/deslop`",
+  "`/loop`",
+  "**create-skill**",
   "environment: \"cloud\"",
   "claude-fable-5-thinking-max",
   "gpt-5.6-sol-max",

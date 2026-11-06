@@ -1,15 +1,31 @@
 #!/usr/bin/env bash
 # Read-only worktree prune audit. Classifies every git worktree by size, merge
-# state, uncommitted work, and remote/PR state. Emits a table sorted by size
-# with a suggested bucket. Never deletes anything; deletion stays a
-# human-gated step in the playbook.
+# state, uncommitted work, lock state, remote/PR state, and the most recent chat
+# that operated in it. Emits a table sorted by size with a suggested bucket.
+# Never deletes anything; deletion stays a human-gated step in the playbook.
 #
-# Usage: worktree-audit.sh [repo-path]   (defaults to the current repo)
+# Usage: worktree-audit.sh [-b|--base <ref>] [repo-path]
+#   repo-path defaults to the current repo.
+#   -b sets the ref the MERGED column checks against (e.g. origin/integration).
+#   Without it the base is origin/HEAD, then origin/main, then origin/master.
+#   origin/HEAD is the remote's default branch, not necessarily the branch PRs
+#   merge into; pass -b when they differ.
 set -u
+
+base=""
+while [ $# -gt 0 ]; do
+	case "$1" in
+	-b|--base) [ $# -ge 2 ] || { echo "error: $1 needs a ref" >&2; exit 2; }; base="$2"; shift 2 ;;
+	-h|--help) sed -n '2,/^set -u/p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
+	-*) echo "error: unknown option: $1" >&2; exit 2 ;;
+	*) break ;;
+	esac
+done
 
 repo="${1:-$(git rev-parse --show-toplevel 2>/dev/null)}"
 [ -z "$repo" ] && { echo "not in a git repo; pass a repo path" >&2; exit 1; }
 cd "$repo" || exit 1
+git rev-parse --git-dir >/dev/null 2>&1 || { echo "error: not a git repo: $repo" >&2; exit 1; }
 
 # Main worktree is the first entry; everything else is a candidate. Strip the
 # record prefix rather than splitting fields so paths containing spaces survive.
@@ -19,30 +35,67 @@ if ! worktree_records=$(git worktree list --porcelain); then
 fi
 main_wt=$(printf '%s\n' "$worktree_records" | awk '/^worktree /{sub(/^worktree /, ""); print; exit}')
 
-# origin/main drives the merge check. Best-effort; stale is fine for a first pass.
-git fetch origin main --quiet 2>/dev/null || echo "warn: could not fetch origin/main; merged column may be stale" >&2
+if [ -z "$base" ]; then
+	for cand in "$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)" origin/main origin/master; do
+		[ -n "$cand" ] && git rev-parse --verify --quiet "$cand^{commit}" >/dev/null && { base="$cand"; break; }
+	done
+	[ -z "$base" ] && { echo "error: no base ref (origin/HEAD, origin/main, origin/master all missing); pass -b <ref>" >&2; exit 1; }
+	echo "warn: no -b given; MERGED checks against $base" >&2
+fi
 
-# PR state by branch, fetched once. Empty if gh is unavailable.
-scratch_dir="$HOME/pstack-scratch/worktree-audit"
-mkdir -p "$scratch_dir"
-prs=$(mktemp "$scratch_dir/prs.XXXXXX")
-trap 'rm -f "$prs"' EXIT INT TERM
-gh pr list --author "@me" --state all --limit 1000 \
-	--json number,state,headRefName 2>/dev/null > "$prs" || echo "[]" > "$prs"
+# The base drives the merge check. The fetch is best-effort (stale is fine for
+# a first pass) and runs before the check, since -b may name a branch not
+# fetched yet. The explicit refspec creates it even in a single-branch clone.
+case "$base" in
+origin/*) git fetch origin "+refs/heads/${base#origin/}:refs/remotes/$base" --quiet 2>/dev/null \
+	|| echo "warn: could not fetch $base; merged column may be stale" >&2 ;;
+esac
+git rev-parse --verify --quiet "$base^{commit}" >/dev/null 2>&1 || { echo "error: base ref not found: $base" >&2; exit 1; }
 
+# GNU coreutils (Linux, Homebrew gnubin) reads `stat -f` as file system status
+# and `date -r` as a file, so pick the stat and date flags once.
+if stat -c %Y / >/dev/null 2>&1; then
+	stat_fmt=(-c '%Y %n'); fmt_day() { date -d "@$1" '+%Y-%m-%d'; }
+else
+	stat_fmt=(-f '%m %N'); fmt_day() { date -r "$1" '+%Y-%m-%d'; }
+fi
+
+# PR state by branch from gh, fetched once as [{number, state, head}] with a
+# lowercase state. Empty when gh cannot read this repo's PRs.
+prs=$(mktemp)
+if raw=$(gh pr list --author "@me" --state all --limit 1000 \
+	--json number,state,headRefName 2>/dev/null); then
+	printf '%s' "$raw" | jq '[.[] | {number, state: (.state | ascii_downcase), head: .headRefName}]' > "$prs" 2>/dev/null
+fi
+[ -s "$prs" ] || echo "[]" > "$prs"
+
+# Transcripts dir: the omp session store, one folder per project cwd, one jsonl
+# per chat. Only the last week of sessions can hold a recent chat, and the
+# store runs to gigabytes, so the file list is built once up front. The search
+# needs ripgrep; without it LAST_CHAT stays empty.
+transcripts="$HOME/.omp/agent/sessions"
+recent_sessions=$(mktemp)
+trap 'rm -f "$prs" "$recent_sessions"' EXIT INT TERM
+if [ -d "$transcripts" ] && command -v rg >/dev/null 2>&1; then
+	find "$transcripts" -name '*.jsonl' -mtime -7 -print0 > "$recent_sessions" 2>/dev/null
+fi
 now=$(date +%s)
 
-printf "SIZE\tAGE\tMERGED\tDIRTY\tLOCKED\tINSPECT\tREMOTE\tPR\tBUCKET\tWORKTREE\n"
+echo "# base: $base"
+printf "SIZE\tAGE\tMERGED\tDIRTY\tLOCKED\tREMOTE\tPR\tLAST_CHAT\tBUCKET\tWORKTREE\n"
 
 printf '%s\n' "$worktree_records" | awk '/^worktree /{sub(/^worktree /, ""); print}' | while IFS= read -r wt; do
 	[ "$wt" = "$main_wt" ] && continue
+	# The lock lives in the same porcelain record, so read it from the captured
+	# output rather than asking git again. A lock is an intentional protection.
 	inspect=ok
 	lock=$(printf '%s\n' "$worktree_records" | awk -v target="$wt" '
 		BEGIN { RS=""; FS="\n" }
 		$1 == "worktree " target {
 			for (i = 1; i <= NF; i++) {
 				if ($i ~ /^locked/) {
-					reason = substr($i, 8)
+					reason = substr($i, 7)
+					sub(/^ /, "", reason)
 					print reason == "" ? "yes" : reason
 					exit
 				}
@@ -51,21 +104,20 @@ printf '%s\n' "$worktree_records" | awk '/^worktree /{sub(/^worktree /, ""); pri
 	[ -z "$lock" ] && lock="-"
 
 	size=$(du -sh "$wt" 2>/dev/null | awk '{print $1}')
-	if ! head=$(git -C "$wt" rev-parse HEAD 2>/dev/null); then
-		head=""
-		inspect="head-error"
-	fi
+	head=$(git -C "$wt" rev-parse HEAD 2>/dev/null)
+	if [ -z "$head" ]; then inspect=head-error; fi
 	head_ts=$(git -C "$wt" log -1 --format='%ct' HEAD 2>/dev/null || echo 0)
 	age=$([ "$head_ts" -gt 0 ] 2>/dev/null && echo "$(( (now - head_ts) / 86400 ))d" || echo "?")
 
-	# Squash-merged branches are not ancestors of main, so PR state is the
+	# Squash-merged branches are not ancestors of the base, so PR state is the
 	# real signal; merge-base only catches fast-forward/rebase merges.
-	git merge-base --is-ancestor "$head" origin/main 2>/dev/null && merged=YES || merged=no
+	git merge-base --is-ancestor "$head" "$base" 2>/dev/null && merged=YES || merged=no
 
-	# Distinguish real WIP (tracked edits) from disposable untracked scratch.
+	# Distinguish real WIP (tracked edits) from disposable untracked scratch. A
+	# failed status read is not clean: it is unknown, and holds.
 	if ! porcelain=$(git -C "$wt" status --porcelain 2>/dev/null); then
 		dirty=error
-		inspect="status-error"
+		inspect=status-error
 	elif [ -z "$porcelain" ]; then dirty=clean
 	elif printf '%s\n' "$porcelain" | grep -qv '^??'; then
 		dirty="wip:$(printf '%s\n' "$porcelain" | grep -cv '^??')"
@@ -80,18 +132,32 @@ printf '%s\n' "$worktree_records" | awk '/^worktree /{sub(/^worktree /, ""); pri
 	else remote=no-remote; fi
 
 	pr=$([ -n "$branch" ] && jq -r --arg b "$branch" \
-		'.[] | select(.headRefName==$b) | "#\(.number)/\(.state)"' "$prs" 2>/dev/null | head -1)
+		'.[] | select(.head==$b) | "#\(.number)/\(.state)"' "$prs" 2>/dev/null | head -1)
 	[ -z "$pr" ] && pr="-"
 
+	# Most recent chat whose transcript operated in this worktree. Match path
+	# followed by "/" or a quote so glint-482 does not match glint-482-r37.
+	last="-"; last_ts=0
+	if [ -s "$recent_sessions" ]; then
+		f=$(xargs -0 rg -l -e "${wt}/" -e "${wt}\"" < "$recent_sessions" 2>/dev/null \
+			| xargs stat "${stat_fmt[@]}" 2>/dev/null | sort -rn | head -1)
+		if [ -n "$f" ]; then last_ts=$(echo "$f" | awk '{print $1}')
+			last=$(fmt_day "$last_ts" 2>/dev/null); fi
+	fi
+	recent=$([ "$last_ts" -gt 0 ] 2>/dev/null && [ $(( (now - last_ts) / 86400 )) -le 4 ] && echo yes || echo no)
+
+	# A failed read holds, a lock holds, then WIP, an open or draft PR, the
+	# recent-chat check, and finally the merged or closed-PR safe case.
 	if [ "$inspect" != ok ]; then bucket=hold-error
-	else case "$lock" in -) ;; *) bucket=hold-locked ;; esac
-	if [ "$lock" = "-" ]; then case "$dirty" in error) bucket=hold-error ;; wip:*) bucket=hold-wip ;; *)
-		case "$pr" in *OPEN*) bucket=hold-open-pr ;; *)
-			if [ "$merged" = YES ] || [ "$pr" != "-" ]; then bucket=safe
+	elif [ "$lock" != "-" ]; then bucket=hold-locked
+	else case "$dirty" in wip:*) bucket=hold-wip ;; *)
+		case "$pr" in */open|*/draft) bucket=hold-open-pr ;; *)
+			if [ "$recent" = yes ]; then bucket=verify-recent-chat
+			elif [ "$merged" = YES ] || [ "$pr" != "-" ]; then bucket=safe
 			else bucket=review; fi ;;
 		esac ;;
-	esac; fi; fi
+	esac; fi
 
 	printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
-		"$size" "$age" "$merged" "$dirty" "$lock" "$inspect" "$remote" "$pr" "$bucket" "$wt"
+		"$size" "$age" "$merged" "$dirty" "$lock" "$remote" "$pr" "$last" "$bucket" "$wt"
 done | sort -t$'\t' -k1,1 -rh

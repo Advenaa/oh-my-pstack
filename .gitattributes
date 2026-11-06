@@ -1,0 +1,11 @@
+# Executable scripts must keep LF line endings, because a CRLF shebang
+# reads as an interpreter path with a stray carriage return.
+*.sh text eol=lf
+*.mjs text eol=lf
+*.ts text eol=lf
+skills/statechart/scripts/statechart text eol=lf
+skills/poteto-mode/scripts/watch-pr/watch-pr text eol=lf
+
+# Markdown and JSON keep the platform's endings; nothing executes them.
+*.md text=auto
+*.json text=auto

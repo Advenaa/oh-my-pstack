@@ -8,11 +8,10 @@ import {
   readFile,
   readdir,
   rm,
-  stat,
   writeFile,
 } from "node:fs/promises";
 import { readFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 
 const root = resolve(
@@ -35,7 +34,7 @@ export function normalizeContent(source) {
     .replaceAll("~/.cursor/rules/pstack-models.mdc", "$PSTACK_CONFIG (or .pstack/config.md)")
     .replaceAll(".cursor/skills/", "skills/")
     .replaceAll(".cursor/plugins/", "plugins/")
-    .replaceAll("subagent_type:", "role:")
+    .replaceAll("subagent_type:", "agent:")
     .replaceAll("AskQuestion", "structured interaction tool")
     .replaceAll('environment: "cloud"', "environment: host-managed")
     .replaceAll("environment: 'cloud'", "environment: host-managed")
@@ -43,7 +42,21 @@ export function normalizeContent(source) {
     .replaceAll("gpt-5.6-sol-max", "host-configured role/model")
     .replaceAll("grok-4.6-fast-xhigh", "host-configured role/model")
     .replaceAll("claude-opus-5-thinking-xhigh", "host-configured role/model")
-    .replaceAll(/\bTask (?:subagent|tool)\b/g, "host task runner");
+    .replaceAll(/\bTask (?:subagent|tool)\b/g, "host task runner")
+    .replaceAll("subagent_type:", "agent:")
+    .replaceAll("the `deslop` skill from the `cursor-team-kit` plugin (`/deslop`)", "the unslop skill")
+    .replaceAll("(`/deslop`)", "(the unslop skill)")
+    .replaceAll("`control-cli`", "the `bash` tool with `pty`")
+    .replaceAll("`control-ui`", "`cua-driver`")
+    .replaceAll("`deslop`", "the unslop skill")
+    .replaceAll("**create-skill** skill", "authoring-a-skill playbook")
+    .replaceAll("via create-skill:", "via the authoring-a-skill playbook:")
+    .replaceAll("via create-skill>", "via the authoring-a-skill playbook>")
+    .replaceAll("`create-skill`", "the authoring-a-skill playbook")
+    .replaceAll("`/loop`", "a run-until instruction")
+    .replaceAll("/loop until", "continue until")
+    .replaceAll("`cursor-team-kit`", "the host's own tooling")
+    .replaceAll("`subagent_type`", "`agent`");
 }
 
 export function isProtectedPath(path) {
@@ -101,52 +114,34 @@ async function sourceRepository(lock, sourceArg) {
   }
 }
 
-async function sourcePathFor(lock, destination, sourceRoot) {
-  for (const mapping of lock.sourceRoots) {
-    const prefix = `${mapping.destination}/`;
-    if (destination.startsWith(prefix)) {
-      const candidate = join(mapping.source, destination.slice(prefix.length));
-      try {
-        await stat(join(sourceRoot, candidate));
-        return candidate;
-      } catch {
-        // Another source root may own this destination.
-      }
-    }
-  }
-  return null;
+
+export function posixKey(path) {
+  return path.split(sep).join("/");
 }
 
-async function protectedChanges(lock, sourceRoot, commit) {
+async function protectedDrift(lock, sourceRoot, commit) {
+  const baselineCommit = lock.commit;
   const changes = [];
-  for (const destination of lock.protectedPaths) {
-    const sourcePath = await sourcePathFor(lock, destination, sourceRoot);
-    if (!sourcePath) continue;
-    const latestPath = join(sourceRoot, sourcePath);
-    try {
-      const latest = await readFile(latestPath);
-      const baseline = execFileSync(
-        "git",
-        ["show", `${lock.commit}:${sourcePath}`],
-        { cwd: sourceRoot },
-      );
-      if (hash(latest) !== hash(baseline)) changes.push(destination);
-    } catch {
-      changes.push(`${destination} (baseline unavailable at ${commit})`);
+
+  for (const mapping of lock.sourceRoots) {
+    const sourceDirectory = join(sourceRoot, mapping.source);
+    for (const sourceFile of await filesUnder(sourceDirectory)) {
+      const destinationKey = `${mapping.destination}/${relative(sourceDirectory, sourceFile).split(sep).join("/")}`;
+      if (!isProtectedPath(destinationKey)) continue;
+      const sourcePath = relative(sourceRoot, sourceFile).split(sep).join("/");
+      try {
+        const latest = hash(await readFile(sourceFile));
+        const baseline = hash(execFileSync("git", ["show", `${baselineCommit}:${sourcePath}`], { cwd: sourceRoot }));
+        if (latest !== baseline) changes.push(destinationKey);
+      } catch {
+        changes.push(`${destinationKey} (upstream added it after ${baselineCommit.slice(0, 8)}, nothing in the port merges it)`);
+      }
     }
   }
   return changes;
 }
 
 async function applyUpdate(lock, sourceRoot, commit, dryRun) {
-  const conflicts = await protectedChanges(lock, sourceRoot, commit);
-  if (conflicts.length > 0) {
-    console.error("Upstream changed protected OMP-adapted files:");
-    for (const path of conflicts) console.error(`- ${path}`);
-    console.error("Review and merge those files manually before rerunning --apply.");
-    return 2;
-  }
-
   const changed = [];
   for (const mapping of lock.sourceRoots) {
     const sourceDirectory = join(sourceRoot, mapping.source);
@@ -156,7 +151,7 @@ async function applyUpdate(lock, sourceRoot, commit, dryRun) {
         mapping.destination,
         relative(sourceDirectory, sourceFile),
       );
-      const destinationKey = relative(root, destination);
+      const destinationKey = posixKey(relative(root, destination));
       if (isProtectedPath(destinationKey)) continue;
       const next = normalizeContent(await readFile(sourceFile, "utf8"));
       let current = null;
@@ -176,11 +171,18 @@ async function applyUpdate(lock, sourceRoot, commit, dryRun) {
 
   if (changed.length === 0) {
     console.log(`No managed skill changes for upstream ${commit}.`);
-    return 0;
+  } else {
+    console.log(`${dryRun ? "Would update" : "Updated"} ${changed.length} managed files:`);
+    for (const path of changed) console.log(`- ${path}`);
   }
-  console.log(`${dryRun ? "Would update" : "Updated"} ${changed.length} managed files:`);
-  for (const path of changed) console.log(`- ${path}`);
-  if (!dryRun) {
+  const frozen = await protectedDrift(lock, sourceRoot, commit);
+  if (frozen.length > 0) {
+    console.log("");
+    console.log(`Upstream moved ${frozen.length} files the port owns and the updater never writes:`);
+    for (const path of frozen) console.log(`- ${path}`);
+    console.log("Merge these by hand, then advance the pin. Until then the port is frozen at the older text.");
+  }
+  if (!dryRun && changed.length > 0) {
     await writeFile(
       lockPath,
       `${JSON.stringify({ ...lock, commit }, null, 2)}\n`,
