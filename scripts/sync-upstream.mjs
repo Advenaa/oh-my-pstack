@@ -119,6 +119,8 @@ export function posixKey(path) {
   return path.split(sep).join("/");
 }
 
+const DRIFT_SHOWN = 10;
+
 async function protectedDrift(lock, sourceRoot) {
   const baselineCommit = lock.commit;
   const changes = [];
@@ -179,8 +181,12 @@ async function applyUpdate(lock, sourceRoot, commit, dryRun) {
   const frozen = await protectedDrift(lock, sourceRoot);
   if (frozen.length > 0) {
     console.log("");
+    const shown = frozen.slice(0, DRIFT_SHOWN);
     console.log(`Upstream moved ${frozen.length} files the port owns and the updater never writes:`);
-    for (const path of frozen) console.log(`- ${path}`);
+    for (const path of shown) console.log(`- ${path}`);
+    if (frozen.length > shown.length) {
+      console.log(`- ... and ${frozen.length - shown.length} more, listed in full by --check`);
+    }
     console.log("Merge these by hand, then advance the pin. Until then the port is frozen at the older text.");
   }
   if (!dryRun && changed.length > 0) {

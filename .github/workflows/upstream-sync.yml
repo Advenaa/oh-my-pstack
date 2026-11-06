@@ -29,6 +29,7 @@ jobs:
       - name: Apply safe upstream update
         id: sync
         run: |
+          set -o pipefail
           node scripts/sync-upstream.mjs --apply | tee sync.log
           if grep -q "Upstream moved" sync.log; then
             echo "drift=1" >> "$GITHUB_OUTPUT"
