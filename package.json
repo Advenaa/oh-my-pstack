@@ -1,6 +1,6 @@
 {
   "name": "pstack-pi",
-  "version": "0.14.3-pi.1",
+  "version": "0.15.0-pi.1",
   "description": "Portable pstack engineering workflows and Agent Skills for Pi, OMP, OpenCode, Claude Code, and Codex.",
   "type": "module",
   "keywords": [

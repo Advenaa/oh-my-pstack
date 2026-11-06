@@ -27,7 +27,18 @@ jobs:
           node-version: 22
 
       - name: Apply safe upstream update
-        run: node scripts/sync-upstream.mjs --apply
+        id: sync
+        run: |
+          node scripts/sync-upstream.mjs --apply | tee sync.log
+          if grep -q "Upstream moved" sync.log; then
+            echo "drift=1" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Annotate the protected files upstream moved
+        if: steps.sync.outputs.drift == '1'
+        run: |
+          echo "::warning title=Upstream changed files this port owns::The daily updater never writes them. Merge by hand, then advance the pin. Run: node scripts/sync-upstream.mjs --apply --dry-run"
+          sed -n '/Upstream moved/,$p' sync.log
 
       - name: Verify package
         run: npm run verify

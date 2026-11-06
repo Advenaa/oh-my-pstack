@@ -10,7 +10,7 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -119,7 +119,7 @@ export function posixKey(path) {
   return path.split(sep).join("/");
 }
 
-async function protectedDrift(lock, sourceRoot, commit) {
+async function protectedDrift(lock, sourceRoot) {
   const baselineCommit = lock.commit;
   const changes = [];
 
@@ -134,7 +134,8 @@ async function protectedDrift(lock, sourceRoot, commit) {
         const baseline = hash(execFileSync("git", ["show", `${baselineCommit}:${sourcePath}`], { cwd: sourceRoot }));
         if (latest !== baseline) changes.push(destinationKey);
       } catch {
-        changes.push(`${destinationKey} (upstream added it after ${baselineCommit.slice(0, 8)}, nothing in the port merges it)`);
+        const here = existsSync(join(root, destinationKey));
+        changes.push(`${destinationKey} (${here ? "hand-ported here; upstream has newer text" : `upstream added it after ${baselineCommit.slice(0, 8)} and the port does not have it`})`);
       }
     }
   }
@@ -175,7 +176,7 @@ async function applyUpdate(lock, sourceRoot, commit, dryRun) {
     console.log(`${dryRun ? "Would update" : "Updated"} ${changed.length} managed files:`);
     for (const path of changed) console.log(`- ${path}`);
   }
-  const frozen = await protectedDrift(lock, sourceRoot, commit);
+  const frozen = await protectedDrift(lock, sourceRoot);
   if (frozen.length > 0) {
     console.log("");
     console.log(`Upstream moved ${frozen.length} files the port owns and the updater never writes:`);

@@ -12,14 +12,14 @@ adapter.
 
 ## What is included
 
-- 44 upstream pstack skills and their supporting references.
+- The upstream pstack skills and their supporting references, 63 directories in all.
 - Benny's three fail-closed issue-triage/reproduction skills.
 - `poteto-mode` for routing work through the right playbook.
 - `pstack-pi` for translating roles, delegation, models, transcripts, questions,
   and long-running work to the active host.
 - Native package metadata for OMP/Pi, Claude Code, and Codex, plus OpenCode setup
   guidance.
-- Daily upstream synchronization that opens a verified pull request.
+- Daily upstream synchronization that opens a verified pull request. The files this port adapts are never written by it, so a day that changes them is reported in the job log for a hand merge rather than applied.
 
 The original Cursor repository is the content authority. The dsebban repository
 was used only as an early structural example; it is not an upstream source.

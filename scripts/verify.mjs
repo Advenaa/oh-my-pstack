@@ -20,6 +20,7 @@ const requiredSkills = new Set([
   "maintain-verification-skill",
   "make-bot-ui",
   "no-comments",
+  "orchestrate-omp",
   "poteto-help",
   "poteto-mode",
   "pstack-pi",
@@ -74,6 +75,10 @@ const skillDirs = (await readdir(skillsRoot, { withFileTypes: true }))
   .map((entry) => entry.name);
 
 for (const name of requiredSkills) {
+  if (!skillDirs.includes(name)) failures.push(`missing skill directory skills/${name}`);
+}
+
+for (const name of skillDirs) {
   const path = join(skillsRoot, name, "SKILL.md");
   try {
     const source = (await readFile(path, "utf8")).replaceAll("\r\n", "\n");
