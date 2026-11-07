@@ -1,0 +1,25 @@
+pinned=2776ddd2355d6d6c8747d3964600f28daf62f049
+latest=6b0300214a09fd6029cfb7077043125758cd1fd2
+Updated 22 managed files:
+- skills/architect/references/design-red-flags.md
+- skills/architect/references/rationale-template.md
+- skills/architect/references/runner-prompt.md
+- skills/blast-radius/SKILL.md
+- skills/reflect/references/synthesizer.md
+- skills/show-me-your-work/scripts/log.sh
+- skills/tdd/SKILL.md
+- skills/technical-writing/SKILL.md
+- skills/typescript-best-practices/SKILL.md
+- skills/typescript-best-practices/references/patterns.md
+- skills/unslop/SKILL.md
+- skills/why/references/epistemics.md
+- skills/why/references/investigator-prompt.md
+- skills/why/references/source-playbook.md
+- skills/why/references/sources/code-archaeology.md
+- skills/why/references/sources/databricks.md
+- skills/why/references/sources/datadog.md
+- skills/why/references/sources/incident-postmortem.md
+- skills/why/references/sources/linear.md
+- skills/why/references/sources/notion.md
+- skills/why/references/sources/sentry.md
+- skills/why/references/sources/slack.md
