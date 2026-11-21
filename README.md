@@ -163,9 +163,10 @@ The updater:
 
 1. Fetches the latest upstream revision.
 2. Normalizes known Cursor runtime bindings for portable hosts.
-3. Updates only upstream-owned files.
+3. Updates upstream-owned files and removes the ones upstream deleted.
 4. Preserves OMP adapters and protected portability adaptations.
-5. Stops before writing if an adapted file changed upstream.
+5. Lists every adapted file upstream changed, added, or deleted since the pin, and
+   leaves the pin at the older revision until those files are merged by hand.
 6. Runs verification, updater tests, Bun tests, and strict TypeScript checking.
 7. Opens a pull request only after those checks pass.
 
@@ -177,8 +178,13 @@ npm run sync:apply -- --dry-run
 npm run sync:apply
 ```
 
+`sync:check` exits 10 when upstream moved and prints the full list of adapted files
+to merge. The updater compares upstream's committed blobs, so a Windows clone with
+`core.autocrlf` gives the same answer as Linux.
+
 Protected adaptation changes require a human merge decision. The updater never
-silently overwrites them.
+silently overwrites them. After merging them, set `commit` in
+`upstream.lock.json` to the merged revision.
 
 ## Development and verification
 
@@ -186,7 +192,7 @@ silently overwrites them.
 npm run verify
 npm run test:sync
 bun install --cwd skills/poteto-mode/scripts --frozen-lockfile
-bun test watch-pr check-plan.test.ts
+bun test watch-pr
 bunx tsc --project skills/poteto-mode/scripts/watch-pr/tsconfig.json --noEmit --strict
 ```
 

@@ -1,17 +1,9 @@
 #!/usr/bin/env node
-import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import {
-  mkdtemp,
-  mkdir,
-  readFile,
-  readdir,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 
 const root = resolve(
@@ -22,12 +14,20 @@ const lockPath = join(root, "upstream.lock.json");
 const boundaryLock = JSON.parse(readFileSync(lockPath, "utf8"));
 
 function git(args, cwd) {
-  return execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+  return execFileSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
 }
 
-function hash(value) {
-  return createHash("sha256").update(value).digest("hex");
+function lf(text) {
+  return text.replaceAll("\r\n", "\n");
 }
+
+export const VENDOR_MODEL_ID =
+  /\b(?:claude|gpt|grok|gemini|composer)(?:-[a-z]+)*-[0-9][a-z0-9.]*(?:-[a-z0-9.]+)*\b/gu;
 
 export function normalizeContent(source) {
   return source
@@ -38,12 +38,8 @@ export function normalizeContent(source) {
     .replaceAll("AskQuestion", "structured interaction tool")
     .replaceAll('environment: "cloud"', "environment: host-managed")
     .replaceAll("environment: 'cloud'", "environment: host-managed")
-    .replaceAll("claude-fable-5-thinking-max", "host-configured role/model")
-    .replaceAll("gpt-5.6-sol-max", "host-configured role/model")
-    .replaceAll("grok-4.6-fast-xhigh", "host-configured role/model")
-    .replaceAll("claude-opus-5-thinking-xhigh", "host-configured role/model")
+    .replaceAll(VENDOR_MODEL_ID, "host-configured role/model")
     .replaceAll(/\bTask (?:subagent|tool)\b/g, "host task runner")
-    .replaceAll("subagent_type:", "agent:")
     .replaceAll("the `deslop` skill from the `cursor-team-kit` plugin (`/deslop`)", "the unslop skill")
     .replaceAll("(`/deslop`)", "(the unslop skill)")
     .replaceAll("`control-cli`", "the `bash` tool with `pty`")
@@ -66,24 +62,47 @@ export function isProtectedPath(path) {
   );
 }
 
-async function filesUnder(directory) {
-  const files = [];
-  async function walk(current) {
-    for (const entry of await readdir(current, { withFileTypes: true })) {
-      if (entry.name === "node_modules") continue;
-      const path = join(current, entry.name);
-      if (entry.isDirectory()) await walk(path);
-      else files.push(path);
+function destinationKey(lock, sourcePath) {
+  for (const mapping of lock.sourceRoots) {
+    if (sourcePath.startsWith(`${mapping.source}/`)) {
+      return `${mapping.destination}/${sourcePath.slice(mapping.source.length + 1)}`;
     }
   }
-  await walk(directory);
-  return files;
+  return null;
+}
+
+function upstreamFiles(lock, sourceRoot, commit) {
+  const sources = lock.sourceRoots.map((mapping) => mapping.source);
+  return git(["ls-tree", "-r", "-z", "--name-only", commit, "--", ...sources], sourceRoot)
+    .split("\0")
+    .filter(Boolean)
+    .map((sourcePath) => ({ sourcePath, key: destinationKey(lock, sourcePath) }));
+}
+
+function upstreamChanges(lock, sourceRoot, baselineCommit, commit) {
+  const sources = lock.sourceRoots.map((mapping) => mapping.source);
+  let output;
+  try {
+    output = git(
+      ["diff", "--name-status", "-z", "--no-renames", baselineCommit, commit, "--", ...sources],
+      sourceRoot,
+    );
+  } catch (error) {
+    const detail = String(error?.stderr ?? error).trim();
+    throw new Error(`Cannot compare the pinned upstream ${baselineCommit} with ${commit}, so drift is unknown: ${detail}`);
+  }
+  const fields = output.split("\0").filter(Boolean);
+  const changes = [];
+  for (let index = 0; index < fields.length; index += 2) {
+    changes.push({ status: fields[index], key: destinationKey(lock, fields[index + 1]) });
+  }
+  return changes;
 }
 
 function parseArgs(argv) {
   const sourceIndex = argv.indexOf("--source");
   return {
-    mode: argv.includes("--check") ? "check" : argv.includes("--apply") ? "apply" : argv.includes("--dry-run") ? "apply" : null,
+    mode: argv.includes("--check") ? "check" : argv.includes("--apply") || argv.includes("--dry-run") ? "apply" : null,
     dryRun: argv.includes("--dry-run"),
     source: sourceIndex === -1 ? null : argv[sourceIndex + 1],
   };
@@ -95,17 +114,13 @@ async function sourceRepository(lock, sourceArg) {
   try {
     execFileSync(
       "git",
-      ["clone", "--depth", "1", "--branch", lock.ref, lock.repository, path],
+      ["clone", "--depth", "1", "--no-checkout", "--branch", lock.ref, lock.repository, path],
       { stdio: "inherit" },
     );
     try {
-      execFileSync(
-        "git",
-        ["fetch", "--quiet", "--depth", "1", "origin", lock.commit],
-        { cwd: path },
-      );
+      git(["fetch", "--quiet", "--depth", "1", "origin", lock.commit], path);
     } catch {
-      // A missing baseline makes protected-file review fail closed.
+      // upstreamChanges fails closed when the baseline is missing.
     }
     return { path, cleanup: path };
   } catch (error) {
@@ -114,88 +129,81 @@ async function sourceRepository(lock, sourceArg) {
   }
 }
 
-
-export function posixKey(path) {
-  return path.split(sep).join("/");
-}
-
 const DRIFT_SHOWN = 10;
 
-async function protectedDrift(lock, sourceRoot) {
-  const baselineCommit = lock.commit;
-  const changes = [];
-
-  for (const mapping of lock.sourceRoots) {
-    const sourceDirectory = join(sourceRoot, mapping.source);
-    for (const sourceFile of await filesUnder(sourceDirectory)) {
-      const destinationKey = `${mapping.destination}/${relative(sourceDirectory, sourceFile).split(sep).join("/")}`;
-      if (!isProtectedPath(destinationKey)) continue;
-      const sourcePath = relative(sourceRoot, sourceFile).split(sep).join("/");
-      try {
-        const latest = hash(await readFile(sourceFile));
-        const baseline = hash(execFileSync("git", ["show", `${baselineCommit}:${sourcePath}`], { cwd: sourceRoot }));
-        if (latest !== baseline) changes.push(destinationKey);
-      } catch {
-        const here = existsSync(join(root, destinationKey));
-        changes.push(`${destinationKey} (${here ? "hand-ported here; upstream has newer text" : `upstream added it after ${baselineCommit.slice(0, 8)} and the port does not have it`})`);
+function protectedDrift(changes, baselineCommit) {
+  const since = baselineCommit.slice(0, 8);
+  return changes
+    .filter((change) => isProtectedPath(change.key))
+    .map(({ status, key }) => {
+      if (status === "A") {
+        const here = existsSync(join(root, key));
+        return `${key} (added upstream after ${since}; ${here ? "the port already has a file there" : "the port does not have it"})`;
       }
-    }
-  }
-  return changes;
+      if (status === "D") return `${key} (deleted upstream after ${since})`;
+      return key;
+    });
 }
 
-async function applyUpdate(lock, sourceRoot, commit, dryRun) {
+async function syncManaged(lock, sourceRoot, commit, changes, dryRun) {
   const changed = [];
-  for (const mapping of lock.sourceRoots) {
-    const sourceDirectory = join(sourceRoot, mapping.source);
-    for (const sourceFile of await filesUnder(sourceDirectory)) {
-      const destination = join(
-        root,
-        mapping.destination,
-        relative(sourceDirectory, sourceFile),
-      );
-      const destinationKey = posixKey(relative(root, destination));
-      if (isProtectedPath(destinationKey)) continue;
-      const next = normalizeContent(await readFile(sourceFile, "utf8"));
-      let current = null;
-      try {
-        current = await readFile(destination, "utf8");
-      } catch {
-        // New upstream file.
-      }
-      if (current === next) continue;
-      changed.push(destinationKey);
-      if (!dryRun) {
-        await mkdir(dirname(destination), { recursive: true });
-        await writeFile(destination, next);
-      }
+  for (const { sourcePath, key } of upstreamFiles(lock, sourceRoot, commit)) {
+    if (isProtectedPath(key)) continue;
+    const destination = join(root, key);
+    const next = normalizeContent(lf(git(["show", `${commit}:${sourcePath}`], sourceRoot)));
+    let current = null;
+    try {
+      current = lf(await readFile(destination, "utf8"));
+    } catch {
+      // New upstream file.
+    }
+    if (current === next) continue;
+    changed.push(key);
+    if (!dryRun) {
+      await mkdir(dirname(destination), { recursive: true });
+      await writeFile(destination, next);
     }
   }
+  const removed = [];
+  for (const { status, key } of changes) {
+    if (status !== "D" || isProtectedPath(key) || !existsSync(join(root, key))) continue;
+    removed.push(key);
+    if (!dryRun) await rm(join(root, key));
+  }
+  return { changed, removed };
+}
 
-  if (changed.length === 0) {
+async function review(lock, sourceRoot, commit, { dryRun, fullDrift }) {
+  const changes = upstreamChanges(lock, sourceRoot, lock.commit, commit);
+  const { changed, removed } = await syncManaged(lock, sourceRoot, commit, changes, dryRun);
+
+  if (changed.length === 0 && removed.length === 0) {
     console.log(`No managed skill changes for upstream ${commit}.`);
-  } else {
+  }
+  if (changed.length > 0) {
     console.log(`${dryRun ? "Would update" : "Updated"} ${changed.length} managed files:`);
     for (const path of changed) console.log(`- ${path}`);
   }
-  const frozen = await protectedDrift(lock, sourceRoot);
+  if (removed.length > 0) {
+    console.log(`${dryRun ? "Would remove" : "Removed"} ${removed.length} managed files upstream deleted:`);
+    for (const path of removed) console.log(`- ${path}`);
+  }
+
+  const frozen = protectedDrift(changes, lock.commit);
   if (frozen.length > 0) {
     console.log("");
-    const shown = frozen.slice(0, DRIFT_SHOWN);
+    const shown = fullDrift ? frozen : frozen.slice(0, DRIFT_SHOWN);
     console.log(`Upstream moved ${frozen.length} files the port owns and the updater never writes:`);
     for (const path of shown) console.log(`- ${path}`);
     if (frozen.length > shown.length) {
       console.log(`- ... and ${frozen.length - shown.length} more, listed in full by --check`);
     }
-    console.log("Merge these by hand, then advance the pin. Until then the port is frozen at the older text.");
+    console.log("Merge these by hand, then advance the pin. Until then the pin stays at the older revision.");
   }
-  if (!dryRun && changed.length > 0) {
-    await writeFile(
-      lockPath,
-      `${JSON.stringify({ ...lock, commit }, null, 2)}\n`,
-    );
+
+  if (!dryRun && frozen.length === 0 && changed.length + removed.length > 0) {
+    await writeFile(lockPath, `${JSON.stringify({ ...lock, commit }, null, 2)}\n`);
   }
-  return 0;
 }
 
 export async function main(argv = process.argv.slice(2)) {
@@ -208,15 +216,19 @@ export async function main(argv = process.argv.slice(2)) {
   const lock = JSON.parse(await readFile(lockPath, "utf8"));
   const source = await sourceRepository(lock, args.source);
   try {
-    const commit = git(["rev-parse", "HEAD"], source.path);
+    const commit = git(["rev-parse", "HEAD"], source.path).trim();
     console.log(`pinned=${lock.commit}`);
     console.log(`latest=${commit}`);
     if (commit === lock.commit) {
       console.log("Upstream is already pinned at the latest checked revision.");
       return 0;
     }
-    if (args.mode === "check") return 10;
-    return await applyUpdate(lock, source.path, commit, args.dryRun);
+    if (args.mode === "check") {
+      await review(lock, source.path, commit, { dryRun: true, fullDrift: true });
+      return 10;
+    }
+    await review(lock, source.path, commit, { dryRun: args.dryRun, fullDrift: false });
+    return 0;
   } finally {
     if (source.cleanup) await rm(source.cleanup, { recursive: true, force: true });
   }

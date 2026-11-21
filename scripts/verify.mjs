@@ -1,6 +1,8 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 
+import { VENDOR_MODEL_ID } from "./sync-upstream.mjs";
+
 const root = resolve(import.meta.dirname, "..");
 const skillsRoot = join(root, "skills");
 const requiredSkills = new Set([
@@ -104,6 +106,7 @@ const collect = async (directory) => {
   }
 };
 await collect(skillsRoot);
+await collect(join(root, "agents"));
 
 for (const path of markdownFiles) {
   const source = await readFile(path, "utf8");
@@ -199,17 +202,18 @@ const forbidden = [
   "`/loop`",
   "**create-skill**",
   "environment: \"cloud\"",
-  "claude-fable-5-thinking-max",
-  "gpt-5.6-sol-max",
-  "grok-4.6-fast-xhigh",
-  "claude-opus-5-thinking-xhigh",
 ];
+const vendorModelId = new RegExp(VENDOR_MODEL_ID.source, "u");
 for (const path of markdownFiles) {
   const source = await readFile(path, "utf8");
   for (const token of forbidden) {
     if (source.includes(token)) {
       failures.push(`${relative(root, path)} contains forbidden runtime binding ${token}`);
     }
+  }
+  const model = source.match(vendorModelId);
+  if (model) {
+    failures.push(`${relative(root, path)} names vendor model ${model[0]}; use a role or configured choice`);
   }
 }
 

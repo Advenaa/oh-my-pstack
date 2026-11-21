@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -13,11 +13,12 @@ test("normalization removes the supported Cursor runtime bindings", () => {
     "agent: Task subagent",
     "question: AskQuestion",
     "model: claude-fable-5-thinking-max",
+    "panel: claude-opus-5-5-xhigh-fast, gemini-4-neon-xhigh, grok-4.7-xhigh-fast",
   ].join("\n");
 
   const normalized = normalizeContent(source);
 
-  assert.doesNotMatch(normalized, /~\/\.cursor\/|AskQuestion|claude-fable/u);
+  assert.doesNotMatch(normalized, /~\/\.cursor\/|AskQuestion|claude|gemini|grok/u);
   assert.match(normalized, /\$PSTACK_CONFIG/u);
   assert.match(normalized, /host task runner/u);
 });
@@ -158,6 +159,87 @@ test("a change inside a protected prefix is reported rather than silently skippe
     assert.match(output, /skills\/poteto-mode\/SKILL\.md/u);
     assert.match(output, /Merge these by hand/u);
     assert.equal(await readFile(join(target, "skills/poteto-mode/SKILL.md"), "utf8"), "the port's own text\n");
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
+function commitAll(cwd, message) {
+  execFileSync("git", ["add", "-A"], { cwd });
+  execFileSync("git", ["commit", "-q", "-m", message], { cwd });
+  return execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" }).trim();
+}
+
+test("drift lists exactly the protected files upstream changed, whatever the source checkout's line endings", async () => {
+  const fixture = await mkdtemp(join(tmpdir(), "pstack-sync-eol-"));
+  const source = join(fixture, "source");
+  const target = join(fixture, "target");
+  const upstream = (path) => join(source, "pstack/skills", path);
+  try {
+    for (const directory of ["poteto-mode", "blast-radius"]) {
+      await mkdir(upstream(directory), { recursive: true });
+      await mkdir(join(target, "skills", directory), { recursive: true });
+    }
+    await writeFile(upstream("poteto-mode/SKILL.md"), "first\n");
+    await writeFile(upstream("poteto-mode/kept.md"), "unchanged upstream\n");
+    await writeFile(upstream("poteto-mode/retired.md"), "retired upstream\n");
+    await writeFile(upstream("blast-radius/SKILL.md"), "managed\n");
+    await writeFile(upstream("blast-radius/gone.md"), "managed and deleted upstream\n");
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: source });
+    execFileSync("git", ["config", "user.email", "test@example.invalid"], { cwd: source });
+    execFileSync("git", ["config", "user.name", "pstack test"], { cwd: source });
+    const baseline = commitAll(source, "baseline");
+    await writeFile(upstream("poteto-mode/SKILL.md"), "second\n");
+    await writeFile(upstream("poteto-mode/worker.md"), "new upstream\n");
+    await rm(upstream("poteto-mode/retired.md"));
+    await rm(upstream("blast-radius/gone.md"));
+    await writeFile(upstream("blast-radius/SKILL.md"), "managed, newer\n");
+    commitAll(source, "newer upstream");
+    // A Windows clone with core.autocrlf=true checks every text file out with CRLF.
+    for (const path of ["poteto-mode/SKILL.md", "poteto-mode/kept.md", "poteto-mode/worker.md", "blast-radius/SKILL.md"]) {
+      const text = await readFile(upstream(path), "utf8");
+      await writeFile(upstream(path), text.replaceAll("\n", "\r\n"));
+    }
+
+    await writeFile(join(target, "skills/poteto-mode/SKILL.md"), "the port's own text\n");
+    await writeFile(join(target, "skills/poteto-mode/kept.md"), "unchanged upstream\r\n");
+    await writeFile(join(target, "skills/blast-radius/SKILL.md"), "managed\r\n");
+    await writeFile(join(target, "skills/blast-radius/gone.md"), "managed and deleted upstream\n");
+    const lock = {
+      repository: "local",
+      ref: "main",
+      path: "pstack",
+      commit: baseline,
+      protectedPrefixes: ["skills/poteto-mode/"],
+      protectedPaths: [],
+      sourceRoots: [{ source: "pstack/skills", destination: "skills" }],
+    };
+    await writeFile(join(target, "upstream.lock.json"), `${JSON.stringify(lock)}\n`);
+    const run = (mode) => spawnSync(
+      process.execPath,
+      [join(process.cwd(), "scripts/sync-upstream.mjs"), mode, "--source", source],
+      { cwd: target, env: { ...process.env, PSTACK_SYNC_ROOT: target }, encoding: "utf8" },
+    );
+
+    const check = run("--check");
+    assert.equal(check.status, 10, check.stderr);
+    const drift = check.stdout.split("\n").filter((line) => line.startsWith("- skills/poteto-mode/"));
+    assert.deepEqual(drift, [
+      "- skills/poteto-mode/SKILL.md",
+      `- skills/poteto-mode/retired.md (deleted upstream after ${baseline.slice(0, 8)})`,
+      `- skills/poteto-mode/worker.md (added upstream after ${baseline.slice(0, 8)}; the port does not have it)`,
+    ]);
+    assert.equal(check.stderr, "");
+
+    const apply = run("--apply");
+    assert.equal(apply.status, 0, apply.stderr);
+    assert.match(apply.stdout, /Updated 1 managed files:\n- skills\/blast-radius\/SKILL\.md\n/u);
+    assert.match(apply.stdout, /Removed 1 managed files upstream deleted:\n- skills\/blast-radius\/gone\.md\n/u);
+    assert.equal(await readFile(join(target, "skills/blast-radius/SKILL.md"), "utf8"), "managed, newer\n");
+    await assert.rejects(readFile(join(target, "skills/blast-radius/gone.md")));
+    assert.equal(await readFile(join(target, "skills/poteto-mode/SKILL.md"), "utf8"), "the port's own text\n");
+    const after = JSON.parse(await readFile(join(target, "upstream.lock.json"), "utf8"));
+    assert.equal(after.commit, baseline, "the pin advanced past protected files nobody merged");
   } finally {
     await rm(fixture, { recursive: true, force: true });
   }
