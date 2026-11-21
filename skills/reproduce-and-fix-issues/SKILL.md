@@ -160,7 +160,7 @@ Collect:
 
 Inspect screenshots and video. Use read-only parallel `explorer` or `reviewer` children for code history, test ideas, blast-radius mapping, and media review when useful. Each child gets a standalone narrow brief and the Slack-write prohibition. If the host lacks child execution, perform the same bounded checks locally without claiming delegated review.
 
-Use pstack's `how` skill to trace the action through the repository. Use `why` for regression history and defensive code. Form competing cause hypotheses and identify evidence that would separate them.
+Trace the action through the repository. Use pstack's `why` skill for regression history and defensive code. Form competing cause hypotheses and identify evidence that would separate them.
 
 ## 7. Reproduce
 

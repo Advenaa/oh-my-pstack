@@ -13,4 +13,4 @@ Make this task deeper, not bigger. Say these four things first, then rewrite the
 3. The specific methods and tools they would use.
 4. What, other than the agent or the user, would show the result is right.
 
-Leave choices that are the user's to make open instead of deciding them.
+Have the rewritten prompt ask the agent to prototype any choice an experiment can settle and recommend an option based on what it observed. Leave product or preference choices that no experiment can settle for the user to make.

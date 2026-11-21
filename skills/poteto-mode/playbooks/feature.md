@@ -1,21 +1,21 @@
 ### Feature
 
-**You own the design. Plan, review, verify.** Delegate implementation; stay in the lead.
+**You own the design. Plan, review, verify.** Delegate implementation. Stay in the lead.
 
-1. `how` over the affected subsystem.
-2. `architect` for parallel design exploration.
+1. Trace the affected subsystem.
+2. `architect` for the shape.
 3. Write the throughput checkpoint as four todo items. A dimension that genuinely does not apply (single file, no fan-out) keeps its item with `n/a: <reason>` rather than being dropped:
    - **Blocking first steps.** Gates run before fan-out.
    - **Independent workstreams.** Disjoint files, services, or layers parallelize. Shared writes serialize.
    - **Shared mutable state.** Default to splitting the target (the **separate-before-serializing-shared-state** principle skill). Serialize only for real invariants.
    - **Smallest safe decomposition.** If one worker is best, name why.
-4. Delegate code-writing through the active adapter's **Bounded session** protocol with canonical `implementer` role and a specific scope. The scope names the file paths, the data shape and its organizing structure per **principle-model-the-domain** (a state machine, a table or registry, a typed model) chosen before the delegate writes logic, the operations, the tests it owns, the success criteria, and explicit no-touch zones. The `feature` entry in the runtime's role configuration sets the delegate's model and reasoning level, and a task item never carries either. When the implementation admits multiple valid shapes (error handling, abstraction layer, test structure), delegate via the **arena** skill instead, so the runners surface the alternatives and the cross-judge guards the pick. Delegation is mandatory. A skip-with-reason does not satisfy it, and the Laziness Protocol does not override it, because the gain is review separation, not lines saved. An implementer that cannot start children satisfies it by owning the diff directly, with the same review separation. Never answer with a standing-by reply that waits on a nested agent. You stay the lead. Review every line and own integration. One writer for tightly coupled code; parallel writers only on structurally disjoint modules with isolated worktrees. Keep the edits surgical, re-ground against the source for upstream-derived files, and when you improve a shared primitive, port the improvement to every consumer and verify each.
-5. Verify on the matching surface. "Inconclusive" or wrong-surface is not a pass; flag it.
-6. Rebase into small, ordered commits; stack follow-ups.
+4. Delegate code-writing through the active adapter's **Bounded session** protocol with a specific scope (file paths, named data shape and its organizing structure per **principle-model-the-domain**, a state machine over scattered booleans, a table/registry over branching, a typed model over repeated shape assumptions, chosen before the delegate writes logic, and success criteria), using the configured `feature, refactoring` choice when present and the canonical `implementer` role otherwise. Set each child's reasoning level for the job through its role configuration, per the Subagents section. When the implementation admits multiple valid shapes (error handling, abstraction layer, test structure), delegate via the **arena** skill instead so the runners surface the alternatives and the cross-judge guards the pick. Mandatory: no skip-with-reason escape, and Laziness Protocol does not override it (the gain is review separation, not lines saved). An agent that cannot start children satisfies this by owning the diff directly with the same review separation. No "standing by" reply that waits on a nested agent. Surgical edits, re-ground against the source for upstream-derived files. Port shared-primitive improvements to all consumers and verify each. Commit liberally.
+5. Verify on the matching surface. "Inconclusive" or wrong-surface is not a pass. Flag it.
+6. Rebase into small, ordered commits. Stack follow-ups.
    Use the **sequence-verifiable-units** principle skill, building, verifying, and committing each small unit before the next.
 7. If the design is contested, `interrogate` before shipping.
 8. Run **Opening a PR**.
 
-Code-coupled work (one feature, one migration) goes to a single owner with the checkpoint inline. That owner decomposes the unit itself after the blocking phase and returns briefs for any helper it needs; the root starts them and relays frozen results back, because children never fan out. Parent-level fan-out is for slices that produce independent artifacts (audits, cross-subsystem investigations, competing experiments). Rewrite the checkpoint at phase boundaries; start a fresh owner rather than changing units through follow-ups.
+Code-coupled work (one feature, one migration) goes to a single owner (the **Long-lived owner** protocol) with the checkpoint inline. That owner decomposes the unit after the blocking phase and returns briefs for any helper it needs. The root starts them, because children never fan out. Parent-level fan-out is for slices that produce independent artifacts (audits, cross-subsystem investigations, competing experiments). Rewrite the checkpoint at phase boundaries. Start a fresh owner rather than changing units through follow-ups.
 
 **Reply:** what you built, what you chose and why, the throughput checkpoint, open decisions. Tables for design alternatives.

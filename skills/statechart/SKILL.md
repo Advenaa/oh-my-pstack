@@ -16,9 +16,9 @@ Work in a scratch folder outside the repo. Write a TLA+ spec and its config. The
 <skill dir>/scripts/statechart SPEC.tla [--config FILE] [--view FILE] [--out DIR]
 ```
 
-`scripts/statechart.ts` is TypeScript, and `scripts/statechart` picks Node, Bun, or Deno to run it, so a host with `bun` needs no other runtime. The command itself needs a POSIX shell, because it runs the worker in its own process group and kills that group when it finishes.
+`scripts/statechart.ts` is TypeScript, so run it with a runtime that can execute TypeScript. `scripts/statechart` is a POSIX shell script that picks Node, Bun, or Deno, so a host with `bun` needs no other runtime. On native Windows, run `node --disable-warning=ExperimentalWarning <skill dir>/scripts/statechart.ts` with Node 22.18 to 22.x, or Node 23.6 or later.
 
-TLC is a separate jar. Point `TLA2TOOLS` at a `tla2tools.jar` and `JAVA` at a Java 11 or later binary, and a host that already has Java needs no `mise`. Without those two variables the command asks `mise` to install TLC 1.7.4 and Temurin 25, which fails where `mise` is absent. To fetch the jar by hand, use the URL and checksum pinned in `scripts/run.ts`; that download needs the network once.
+The first run installs TLC and Java with mise and needs the network. Where mise is absent, point `TLA2TOOLS` at a `tla2tools.jar` (its URL and checksum are pinned in `scripts/run.ts`) and `JAVA` at a Java 11 or later binary; without `JAVA` the command runs `java` from `PATH`.
 
 ## Write the spec
 

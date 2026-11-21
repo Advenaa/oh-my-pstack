@@ -8,35 +8,35 @@ disable-model-invocation: true
 
 Follow the [portable runtime contract](../pstack-pi/references/runtime.md) for skill paths, host capability discovery, questions, roles, models, and durable automation facilities.
 
-Benny is a dormant pair of automation workflows backed by the sibling **triage-issue-reports** and **reproduce-and-fix-issues** skills. Benny needs external configuration and two live host automations or durable loops. Do not assume a particular editor, cloud checkout, plugin cache, protocol link, or automation backend.
+Benny is a dormant pair of automation workflows backed by the sibling **triage-issue-reports** and **reproduce-and-fix-issues** skills. Do not assume a particular editor, cloud checkout, plugin cache, protocol link, or automation backend.
+
+Benny needs external configuration and two live host automations or durable loops.
 
 Do not create or update an automation until the user explicitly asks. Never put a secret value in skill files, prompts, or committed configuration.
 
-## 1. Install the operational skills and shared dependencies
+## 1. Install the operational skills and shared pstack skills
 
 Do this before asking for Benny configuration and before using the host's automation facility.
 
-Ask which repository will run the automations. Use the current package's `skills/` directory as the source. The target must expose these project-local paths, either through the host's package installation mechanism or as committed files:
+Ask which repository will run the automations. The source is the current package's `skills/` directory. The target must expose these project-local paths, either through the host's package installation mechanism or as committed files:
 
 - `skills/setup-benny/SKILL.md`
 - `skills/triage-issue-reports/SKILL.md` and its references
 - `skills/reproduce-and-fix-issues/SKILL.md` and its references
 - `skills/pstack-pi/references/runtime.md`
-- the shared pstack skills named by the two operational skills
 
 When copying is required:
 
 1. Copy every file from each required skill directory to the same project-relative path.
 2. Preserve destination-only files. Never delete unrelated files during install or refresh.
 3. Keep user-owned configuration, feature maps, and routing maps outside the imported skill directories. Never overwrite them.
-4. Inspect differences in source-managed files and merge without discarding local edits. If ownership is ambiguous, stop and ask before replacing anything.
-5. Verify that both operational skills, every imported reference, and the runtime contract resolve from the target repository.
+4. When an existing source-managed file differs, inspect the diff and merge without discarding local edits. If ownership is ambiguous, stop and ask before replacing it.
+5. Verify that the target contains this setup file, both operational files, their references, and the runtime contract.
 
-If this file is already running from the target repository, treat installation as complete only after the same verification.
+If this file is already being read from the target repository, treat the installation as complete and run the same verification before continuing.
 
-Start a fresh agent rooted in the target repository and verify that these sibling skills resolve from project scope:
+Reload the target project or start a fresh agent rooted there. Verify that these shared pstack skills resolve from project scope:
 
-- `how`
 - `why`
 - `tdd`
 - `unslop`
@@ -47,29 +47,37 @@ Start a fresh agent rooted in the target repository and verify that these siblin
 - `principle-fix-root-causes`
 - `principle-prove-it-works`
 
-Do not count a skill visible only through the current session or a user-global installation. The check must show that a fresh agent in the target repository receives the dependencies through project scope.
+Do not count a skill loaded from the current session or a user-global installation. The check must show that a fresh agent in the target repository receives pstack through project scope.
 
-If project-scoped skill installation is unavailable or any shared dependency does not resolve, stop and explain the limit.
+If project-scoped skill installation is unavailable or any shared dependency does not resolve, stop and explain the failure.
 
-Tell the user that the operational skills and any referenced secret-free configuration must be committed on the branch used by the automation checkout before either automation is enabled. Do not commit them unless the user asks.
+Tell the user that the operational skills and any referenced secret-free configuration must be committed before either automation is enabled. Do not commit them unless the user asks.
 
-Once this check passes, live automation prompts may read the committed operational skills by stable repository-relative paths. They must not embed an installation cache path or copy the skill contents.
+Once this check passes, live automation prompts may read the committed operational files by their stable repository-relative paths. They must not embed an installation cache path or copy the file contents.
 
-## 2. Create user-owned configuration
+## 2. Adapt the configuration
 
-Create configuration outside the imported skill directories. Recommended project-local locations:
+Open this imported example:
 
-- `.benny/configuration.yaml`
-- `.benny/feature-map.md`
-- `.benny/routing.md`
+- `../reproduce-and-fix-issues/references/feature-map.example.md`
 
-A user-level path such as `~/.config/benny/configuration.yaml` or `~/.config/benny/feature-map.md` is valid only when the live automation can access it. Prefer committed, secret-free project files when an isolated checkout must read them. Otherwise paraphrase the required values into the live prompt. Reference a repository file only after the host automation facility confirms that it is committed in the repository where the automation runs. Store secrets in the host's secret manager or environment.
+Create user-owned copies outside the imported skill directories. These are configuration files, not skill files. Example locations:
 
-Start the feature map from [`../reproduce-and-fix-issues/references/feature-map.example.md`](../reproduce-and-fix-issues/references/feature-map.example.md). Fill one section for every user-facing feature the automation may reproduce. Keep it at the user point of view; do not freeze implementation details or current code paths.
+- Project config, such as `.benny/configuration.yaml`
+- Project feature map, such as `.benny/feature-map.md`
+- Project routing map, such as `.benny/routing.md`
+- User config, such as `~/.config/benny/configuration.yaml`
+- User feature map, such as `~/.config/benny/feature-map.md`
 
-Do not edit imported examples. Package refreshes may update source-managed files after conflict review, but they must never touch user-owned copies.
+A user-level path is valid only when the live automation can read it.
 
-Use stable repository-relative paths in live automation prompts. Never reference an installation cache or a vendor-global path.
+Fill one feature-map section for every user-facing feature the automation may reproduce. Keep it at the user point of view. Do not freeze implementation details or current code paths in the map.
+
+Do not edit the imported example. Package refreshes may update source-managed files after conflict review, but they must never touch the user-owned copies.
+
+Prefer committed, secret-free files in the target repository when a fresh automation checkout must read them. Otherwise paraphrase the required values into the live prompt. Reference a repository file only after the host automation facility confirms that the file is committed in the repository where the automation runs.
+
+Use stable repository-relative paths for committed skill and configuration files. Never reference the package source directory or an installation cache path from a live automation.
 
 ## 3. Fill the required choices
 
@@ -89,11 +97,11 @@ Ask for or confirm:
 - Polling and effort budgets
 - Role or model choice for triage, repro, code work, and media review
 
-Use canonical runtime roles or only model choices confirmed by the live host inventory. Do not guess a slug or carry over a private default.
+Use canonical runtime roles, or only model choices that the live host inventory shows as available. Do not guess a slug and do not carry over a private default.
 
 The source channel, triage identity, repository, tracker adapter, control skill, and feature map must be explicit. Fail setup if any required value stays ambiguous.
 
-Invoke the sibling **unslop** skill on final automation names, descriptions, and prompt shims before saving them.
+Invoke the sibling **unslop** skill on the final automation names, descriptions, and prompt shims before saving them.
 
 ## 4. Check integration capabilities
 
@@ -113,7 +121,7 @@ The repro automation needs:
 - A pull request action that can open a draft pull request
 - The configured control-adapter skill
 
-Prefer Slack actions exposed by the current host. The optional `BENNY_SLACK_BOT_TOKEN` may fill a narrow missing capability such as editing one operations status message or downloading an attachment. Store it in a secret manager or environment, never YAML, and never expose it to a child.
+Prefer Slack actions configured in the current host for reads and posts. The optional `BENNY_SLACK_BOT_TOKEN` may fill a narrow gap such as editing one operations status message or downloading an attachment. Store the value in a secret manager or environment, not in YAML.
 
 Do not use undocumented integration endpoints.
 
@@ -121,7 +129,7 @@ Do not use undocumented integration endpoints.
 
 If the user wants reroutes or owner pings:
 
-1. Copy [`../triage-issue-reports/references/routing.example.md`](../triage-issue-reports/references/routing.example.md) to a user-owned path such as `.benny/routing.md`.
+1. Copy `../triage-issue-reports/references/routing.example.md` outside the imported skill directories.
 2. Replace every placeholder with public or organization-local values.
 3. Keep owner pings off by default.
 4. Allow a ping only for a configured feature owner or a confirmed likely regression author.
@@ -130,7 +138,7 @@ If no routing map is configured, triage may classify a report but must not guess
 
 ## 6. Verify the control adapter
 
-Read [`../reproduce-and-fix-issues/references/control-adapter.md`](../reproduce-and-fix-issues/references/control-adapter.md) and the user's completed feature map.
+Read `../reproduce-and-fix-issues/references/control-adapter.md` and the user's completed feature map.
 
 Confirm that the named skill can:
 
@@ -146,23 +154,27 @@ If any capability is missing, leave the repro automation disabled. It must fail 
 
 ## 7. Prepare the live automations
 
-Ask whether this is first-time creation or configuration of existing automations. Use the host's reviewed durable automation, scheduled task, or long-running loop facility. If none exists, produce the reviewed configuration and prompt text for manual installation, report the host limit, and do not claim either automation is live.
+Ask whether this is first-time creation or configuration of existing automations.
+
+Use the host's reviewed durable automation, scheduled task, or long-running loop facility. If none exists, produce the reviewed configuration and prompt text for manual installation, report the host limit, and do not claim either automation is live.
+
+Read the matching operational skill as the primary user-intent source for either path. Use it and the finished Benny configuration to understand the two triggers, tools, instructions, outcomes, and shared rules.
 
 ### First-time creation
 
-Create one automation at a time. For each automation:
+Create one automation at a time.
 
-1. Read the matching operational skill as the primary source and use the finished Benny configuration as the binding for its trigger, tools, instructions, outcomes, and shared rules.
-2. Turn that intent into a complete natural-language request.
-3. Tell the live prompt to read and follow its exact committed operational skill path.
-4. Use stable repository-relative paths and do not inline the operational skill body.
-5. Let the host discover connected channels, repositories, and integrations when it supports discovery; otherwise verify each configured capability directly.
-6. Confirm that the operational skills and referenced configuration are committed in the repository and branch where the automation runs.
-7. Let the documented host surface handle authentication, completeness review, draft review, approval, readiness, and final handoff when it provides those gates. Preserve every gate when it does not.
-8. Show the user the complete draft and obtain explicit approval before creation or enablement.
-9. Finish the reviewed handoff for this automation before starting the next one.
+For each automation:
 
-Use this complete triage intent, filled from configuration:
+1. Turn the operational skill and the finished Benny configuration into a complete natural-language request.
+2. Tell the live prompt to read and follow its exact committed operational file under `skills/`.
+3. Use the stable repository-relative path, not a package source or cache path. Do not copy the operational file contents into the live prompt.
+4. Let the host automation facility discover Slack channels, the repository, and connected integrations. Where it cannot, verify each configured capability directly.
+5. Confirm that the operational skills and any referenced configuration files are committed in the same repository where the automation will run.
+6. Let the host automation facility show its draft, obtain approval, ask readiness, and hand off to its editor. Where it lacks one of those gates, show the user the complete draft and obtain explicit approval before creation or enablement.
+7. Finish the reviewed handoff for this automation before starting the next one.
+
+Give the host automation facility this complete triage intent, filled from configuration:
 
 - Name `benny-triage`.
 - Read and follow `skills/triage-issue-reports/SKILL.md` for every run.
@@ -173,14 +185,14 @@ Use this complete triage intent, filled from configuration:
 - End one thread-only verdict with the configured `[benny:bug]`, `[benny:performance]`, or `[benny:other]` marker and optional tracker URL.
 - Never post a source-channel root message.
 
-After the triage handoff is complete, use this complete repro and fix intent:
+After the triage handoff is complete, give the host automation facility this complete repro and fix intent:
 
 - Name `benny-reproduce`.
 - Read and follow `skills/reproduce-and-fix-issues/SKILL.md` for every run.
 - Trigger on the same new top-level reports in the configured source Slack channel.
 - Use the configured repository and default branch.
 - Read the source thread and reply only inside it.
-- Include pull request creation and the configured tracker, control-adapter, and feature-map requirements. Paraphrase mapped user paths and states unless the host confirms an eligible committed file in the same repository.
+- Include pull request creation and the configured tracker, control-adapter, and feature-map requirements. Paraphrase mapped user paths and states unless the host automation facility confirms an eligible committed file in the same repository.
 - Wait for a trusted triage marker before acting.
 - Reproduce the exact symptom twice through the mapped real UI and capture evidence.
 - Verify an existing fix without authoring over it.
@@ -191,7 +203,9 @@ Do not duplicate the host automation facility's Slack, repository, integration, 
 
 ### Existing automations
 
-Finish configuration, routing, control-adapter, and feature-map validation. Use the host's supported editor or update surface. Do not search for or mutate an automation through an undocumented backend. Give the user this concise checklist when the host cannot inspect existing automations.
+If the host automation facility is creation-only, do not use it to search for, inspect, or update existing automations.
+
+Finish configuration, routing, control-adapter, and feature-map validation. Then give the user this concise editor checklist.
 
 For the existing triage automation, update:
 
@@ -213,17 +227,19 @@ For the existing repro automation, update:
 - Tracker, control-adapter, and feature-map requirements
 - Paraphrased marker wait, evidence, verification, and bounded-fix instructions
 
-Ask the user to update each existing automation through the documented host surface. Never create replacements or duplicates merely because the host cannot inspect an existing automation.
+Ask the user to update each existing automation directly in the host's documented automation editor or update surface. Do not create replacements or duplicates.
 
 ### Creation boundary
 
-Use only a documented, reviewed host surface. Never call an undocumented automation backend, encode draft fields in a browser URL, or build a vendor protocol deep link. Do not enable either automation until the thread-safety test passes after save.
+Never call an undocumented automation backend service or backend automation tool. Never use a browser URL that carries draft fields. Never build or open a vendor protocol deep link. For new automations, the only finish path is the host automation facility's reviewed handoff, or the manual-installation text when the host has none.
+
+Do not enable either automation until the thread-safety test passes after the save.
 
 ## 8. Test thread safety
 
-Use a test channel or harmless test report.
+Use a test channel or a harmless test report.
 
-Before testing, confirm that both operational skills, the runtime contract, and every referenced secret-free configuration file are committed on the branch used by the automation checkout. Confirm that both live prompts point at their exact committed operational skill paths. If any check fails, stop and tell the user that the automation cannot be enabled yet.
+Before testing, confirm that both operational skills, the runtime contract, and every referenced secret-free configuration file are committed on the branch used by the automation checkout. Confirm that both live prompts point at their exact committed operational files. If any check fails, stop. Tell the user that the automation cannot be enabled yet.
 
 Verify:
 
