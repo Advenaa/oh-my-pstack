@@ -1,7 +1,6 @@
 pinned=792440e8a560a4a3f63748cdee70491ecd412982
-latest=ca782ed8b3c2c521cead8e1720d55c3a5dbf2347
-Updated 1 managed files:
-- skills/reframe/SKILL.md
+latest=b7b93c36be9bcc36a74db438e0fd385d660bc559
+No managed skill changes for upstream b7b93c36be9bcc36a74db438e0fd385d660bc559.
 
 Upstream moved 1 files the port owns and the updater never writes:
 - skills/poteto-help/SKILL.md
